@@ -131,6 +131,25 @@ class __FS(__AbstractDataset):
             ann = ann.astype("int32")
 
         return ann
+
+class __NuCLS(__AbstractDataset):
+    """NuCLS adapter.
+
+    Assumes .mat annotations contain `inst_map` and optional `type_map`,
+    matching the training patch extraction pipeline used in this repository.
+    """
+
+    def load_img(self, path):
+        return cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
+
+    def load_ann(self, path, with_type=False):
+        ann_inst = sio.loadmat(path)["inst_map"]
+        if with_type:
+            ann_type = sio.loadmat(path)["type_map"]
+            ann = np.dstack([ann_inst, ann_type]).astype("int32")
+        else:
+            ann = np.expand_dims(ann_inst, -1).astype("int32")
+        return ann
 ####
 def get_dataset(name):
     """Return a pre-defined dataset object associated with `name`."""
@@ -139,6 +158,7 @@ def get_dataset(name):
         "cpm17": lambda: __CPM17(),
         "consep": lambda: __CoNSeP(),
         "fs": lambda: __FS(),
+        "nucls": lambda: __NuCLS(),
     }
     if name.lower() in name_dict:
         return name_dict[name]()

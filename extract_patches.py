@@ -3,6 +3,7 @@
 Patch extraction script.
 """
 
+import argparse
 import re
 import glob
 import os
@@ -16,85 +17,88 @@ from misc.utils import rm_n_mkdir
 
 from dataset import get_dataset
 
-# -------------------------------------------------------------------------------------
-if __name__ == "__main__":
 
-    # Determines whether to extract type map (only applicable to datasets with class labels).
-    type_classification = True
+def build_args():
+    parser = argparse.ArgumentParser(description="Extract training/validation patches.")
+    parser.add_argument("--dataset_name", default="nucls", help="Dataset key from dataset.py (e.g. nucls, fs, kumar)")
+    parser.add_argument("--save_root", default="dataset/training_data", help="Root directory for extracted .npy patches")
+    parser.add_argument("--train_img_dir", required=True, help="Training images directory")
+    parser.add_argument("--train_ann_dir", required=True, help="Training annotations directory")
+    parser.add_argument("--valid_img_dir", required=True, help="Validation images directory")
+    parser.add_argument("--valid_ann_dir", required=True, help="Validation annotations directory")
+    parser.add_argument("--img_ext", default=".png", help="Image extension (e.g. .png, .jpg, .tif)")
+    parser.add_argument("--ann_ext", default=".mat", help="Annotation extension")
+    parser.add_argument("--win_size", type=int, default=256, help="Patch extraction window size")
+    parser.add_argument("--step_size", type=int, default=250, help="Patch extraction step size")
+    parser.add_argument(
+        "--extract_type",
+        choices=["mirror", "valid"],
+        default="mirror",
+        help="mirror: pad borders, valid: only valid crop regions",
+    )
+    parser.add_argument(
+        "--no_type_classification",
+        action="store_true",
+        help="Disable type-map extraction for datasets without type labels",
+    )
+    return parser.parse_args()
 
-    win_size = [256, 256]
-    step_size = [250, 250]
-    extract_type = "mirror"  # Choose 'mirror' or 'valid'. 'mirror'- use padding at borders. 'valid'- only extract from valid regions.
 
-    # Name of dataset - use Kumar, CPM17 or CoNSeP.
-    # This used to get the specific dataset img and ann loading scheme from dataset.py
-    dataset_name = "kumar"
-    save_root = "dataset/training_data/%s/" % dataset_name
-
-    # a dictionary to specify where the dataset path should be
-    dataset_info = {
-        "train": {
-            "img": (".png", "D:\\MICCAI_2021\\codes\\hover_net\\pseudo\\input_crop\\"),
-            "ann": (".mat", "D:\\MICCAI_2021\\codes\\hover_net\\pseudo\\mat\\"),
-        },
-        "valid": {
-            "img": (".png", "D:\\MICCAI_2021\\maskrcnn_experiment\\data\\original\\stage1_train_24\\validation\\images\\"),
-            "ann": (".mat", "D:\\MICCAI_2021\\maskrcnn_experiment\\data\\original\\stage1_train_24\\validation\\labels\\"),
-        },
-    }
+def extract_split(split_name, split_desc, cfg, dataset_parser, xtractor):
+    img_ext, img_dir = split_desc["img"]
+    ann_ext, ann_dir = split_desc["ann"]
+    output_tag = "%dx%d_%dx%d" % (cfg.win_size, cfg.win_size, cfg.step_size, cfg.step_size)
+    out_dir = os.path.join(cfg.save_root, cfg.dataset_name, cfg.dataset_name, split_name, output_tag)
 
     patterning = lambda x: re.sub("([\[\]])", "[\\1]", x)
-    parser = get_dataset(dataset_name)
+    file_list = glob.glob(patterning("%s/*%s" % (ann_dir, ann_ext)))
+    file_list.sort()
+    if len(file_list) == 0:
+        raise RuntimeError("No annotation files detected in %s with extension %s" % (ann_dir, ann_ext))
+
+    rm_n_mkdir(out_dir)
+    print("Extracting %s split into %s" % (split_name, out_dir))
+
+    pbar_format = "Process File: |{bar}| {n_fmt}/{total_fmt}[{elapsed}<{remaining},{rate_fmt}]"
+    pbarx = tqdm.tqdm(total=len(file_list), bar_format=pbar_format, ascii=True, position=0)
+
+    for file_path in file_list:
+        base_name = pathlib.Path(file_path).stem
+        img_path = "%s/%s%s" % (img_dir, base_name, img_ext)
+        ann_path = "%s/%s%s" % (ann_dir, base_name, ann_ext)
+
+        img = dataset_parser.load_img(img_path)
+        ann = dataset_parser.load_ann(ann_path, not cfg.no_type_classification)
+        img = np.concatenate([img, ann], axis=-1)
+        sub_patches = xtractor.extract(img, cfg.extract_type)
+
+        pbar = tqdm.tqdm(
+            total=len(sub_patches),
+            leave=False,
+            bar_format="Extracting  : |{bar}| {n_fmt}/{total_fmt}[{elapsed}<{remaining},{rate_fmt}]",
+            ascii=True,
+            position=1,
+        )
+        for idx, patch in enumerate(sub_patches):
+            np.save("{0}/{1}_{2:03d}.npy".format(out_dir, base_name, idx), patch)
+            pbar.update()
+        pbar.close()
+        pbarx.update()
+    pbarx.close()
+
+
+# -------------------------------------------------------------------------------------
+if __name__ == "__main__":
+    args = build_args()
+    win_size = [args.win_size, args.win_size]
+    step_size = [args.step_size, args.step_size]
+
+    dataset_info = {
+        "train": {"img": (args.img_ext, args.train_img_dir), "ann": (args.ann_ext, args.train_ann_dir)},
+        "valid": {"img": (args.img_ext, args.valid_img_dir), "ann": (args.ann_ext, args.valid_ann_dir)},
+    }
+    dataset_parser = get_dataset(args.dataset_name)
     xtractor = PatchExtractor(win_size, step_size)
+
     for split_name, split_desc in dataset_info.items():
-        img_ext, img_dir = split_desc["img"]
-        ann_ext, ann_dir = split_desc["ann"]
-        
-        out_dir = "%s/%s/%s/%dx%d_%dx%d/" % (
-            save_root,
-            dataset_name,
-            split_name,
-            win_size[0],
-            win_size[1],
-            step_size[0],
-            step_size[1],
-        )
-        file_list = glob.glob(patterning("%s/*%s" % (ann_dir, ann_ext)))
-        file_list.sort()  # ensure same ordering across platform
-        print(file_list)
-        rm_n_mkdir(out_dir)
-
-        pbar_format = "Process File: |{bar}| {n_fmt}/{total_fmt}[{elapsed}<{remaining},{rate_fmt}]"
-        pbarx = tqdm.tqdm(
-            total=len(file_list), bar_format=pbar_format, ascii=True, position=0
-        )
-
-        for file_idx, file_path in enumerate(file_list):
-            base_name = pathlib.Path(file_path).stem
-
-            img = parser.load_img("%s/%s%s" % (img_dir, base_name, img_ext))
-            ann = parser.load_ann(
-                "%s/%s%s" % (ann_dir, base_name, ann_ext), type_classification
-            )
-
-            # *
-            img = np.concatenate([img, ann], axis=-1)
-            sub_patches = xtractor.extract(img, extract_type)
-
-            pbar_format = "Extracting  : |{bar}| {n_fmt}/{total_fmt}[{elapsed}<{remaining},{rate_fmt}]"
-            pbar = tqdm.tqdm(
-                total=len(sub_patches),
-                leave=False,
-                bar_format=pbar_format,
-                ascii=True,
-                position=1,
-            )
-
-            for idx, patch in enumerate(sub_patches):
-                np.save("{0}/{1}_{2:03d}.npy".format(out_dir, base_name, idx), patch)
-                pbar.update()
-            pbar.close()
-            # *
-
-            pbarx.update()
-        pbarx.close()
+        extract_split(split_name, split_desc, args, dataset_parser, xtractor)

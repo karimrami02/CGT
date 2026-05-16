@@ -60,7 +60,12 @@ python -u run_infer_all.py
 Output: : <br />
 - mat files / JSON files: Including centroid coordinates and nuclei types.
 - overlay images: Visualization of the classification results.
+
+## NuCLS in Lightning AI Studio
+
+For a full NuCLS experiment checklist (dataset layout, extraction, env configuration, training/inference/eval commands), use:
+
+- `.github/cgt.md`
 ## Citation
 
 If any part of this code is used, please give appropriate citations to our paper. <br />
-

@@ -9,8 +9,14 @@ import os
 from collections import OrderedDict
 ####
 
-training_weights = [5,2,4] ##Change based on different datasets
-edge_num = 4
+def _parse_class_weights():
+    raw = os.environ.get("CGT_CLASS_WEIGHTS", "5,2,4")
+    weight_list = [item.strip() for item in raw.split(",")]
+    weight_list = [item for item in weight_list if item != ""]
+    return [float(item) for item in weight_list]
+
+training_weights = _parse_class_weights() ##Change based on different datasets
+edge_num = int(os.environ.get("CGT_EDGE_NUM", "4"))
 
 def train_step(batch_data, run_info):
     # TODO: synchronize the attach protocol
@@ -52,6 +58,11 @@ def train_step(batch_data, run_info):
     }
 
     if model.module.nr_types is not None:
+        if len(training_weights) != (model.module.nr_types - 1):
+            raise ValueError(
+                "Expected %d class weights in CGT_CLASS_WEIGHTS, got %d."
+                % (model.module.nr_types - 1, len(training_weights))
+            )
         true_tp = batch_data["tp_map"]
         #print(true_tp.shape)
         true_tp = torch.squeeze(true_tp).to("cuda").type(torch.int64)

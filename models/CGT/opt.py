@@ -1,4 +1,5 @@
 import torch.optim as optim
+import os
 
 from run_utils.callbacks.base import (
     AccumulateRawOutput,
@@ -21,78 +22,104 @@ from .run_desc import proc_valid_step_output, train_step, valid_step, viz_step_o
 # TODO: training config only ?
 # TODO: switch all to function name String for all option
 def get_config(nr_type, mode):
+    def _get_env_int(name, default):
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            return default
+        return int(raw)
+
+    def _get_env_float(name, default):
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            return default
+        return float(raw)
+
+    def _get_env_bool(name, default):
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            return default
+        return raw.lower() not in ["0", "false", "no", "off"]
+
+    phase1_pretrained = os.environ.get("CGT_PHASE1_PRETRAINED", "").strip()
+    if phase1_pretrained == "":
+        phase1_pretrained = None
+
+    phase1_cfg = {
+        "run_info": {
+            "net": {
+                "desc": lambda: create_model(
+                    input_ch=3, nr_types=nr_type, 
+                    freeze=False, mode=mode
+                ),
+                "optimizer": [
+                    optim.Adam,
+                    {
+                        "lr": _get_env_float("CGT_PHASE1_LR", 1.0e-5),
+                        "betas": (0.9, 0.999),
+                    },
+                ],
+                "lr_scheduler": lambda x: optim.lr_scheduler.StepLR(x, 25),
+                "extra_info": {
+                    "loss": {
+                        "np": {"bce": 1, "dice": 1},
+                        "hv": {"mse": 1, "msge": 1},
+                        "tp": {"bce": 0, "dice": 0},
+                    },
+                },
+                "pretrained": phase1_pretrained,
+            },
+        },
+        "target_info": {"gen": (gen_targets, {}), "viz": (prep_sample, {})},
+        "batch_size": {
+            "train": _get_env_int("CGT_PHASE1_BATCH_TRAIN", 64),
+            "valid": _get_env_int("CGT_PHASE1_BATCH_VALID", 64),
+        },
+        "nr_epochs": _get_env_int("CGT_PHASE1_EPOCHS", 100),
+    }
+
+    phase2_cfg = {
+        "run_info": {
+            "net": {
+                "desc": lambda: create_model(
+                    input_ch=3, nr_types=nr_type, 
+                    freeze=False, mode=mode
+                ),
+                "optimizer": [
+                    optim.Adam,
+                    {
+                        "lr": _get_env_float("CGT_PHASE2_LR", 1.0e-4),
+                        "betas": (0.9, 0.999),
+                    },
+                ],
+                "lr_scheduler": lambda x: optim.lr_scheduler.StepLR(x, 25),
+                "extra_info": {
+                    "loss": {
+                        "np": {"bce": 1, "dice": 1},
+                        "hv": {"mse": 1, "msge": 1},
+                        "tp": {"bce": 1, "dice": 1},
+                    },
+                },
+                "pretrained": -1,
+            },
+        },
+        "target_info": {"gen": (gen_targets, {}), "viz": (prep_sample, {})},
+        "batch_size": {
+            "train": _get_env_int("CGT_PHASE2_BATCH_TRAIN", 16),
+            "valid": _get_env_int("CGT_PHASE2_BATCH_VALID", 16),
+        },
+        "nr_epochs": _get_env_int("CGT_PHASE2_EPOCHS", 100),
+    }
+
+    phase_list = [phase1_cfg]
+    if _get_env_bool("CGT_ENABLE_PHASE2", True):
+        phase_list.append(phase2_cfg)
+
+    dataset_name = os.environ.get("CGT_DATASET_NAME", "fs")
     return {
         # ------------------------------------------------------------------
         # ! All phases have the same number of run engine
         # phases are run sequentially from index 0 to N
-        "phase_list": [
-            {
-                "run_info": {
-                    # may need more dynamic for each network
-                    "net": {
-                        "desc": lambda: create_model(
-                            input_ch=3, nr_types=nr_type, 
-                            freeze=False, mode=mode
-                        ),
-                        "optimizer": [
-                            optim.Adam,
-                            {  # should match keyword for parameters within the optimizer
-                                "lr": 1.0e-5,  # initial learning rate,
-                                "betas": (0.9, 0.999),
-                            },
-                        ],
-                        # learning rate scheduler
-                        "lr_scheduler": lambda x: optim.lr_scheduler.StepLR(x, 25),
-                        "extra_info": {
-                            "loss": {
-                                "np": {"bce": 1, "dice": 1},
-                                "hv": {"mse": 1, "msge": 1},
-                                "tp": {"bce": 0, "dice": 0},
-                            },
-                        },
-
-                        "pretrained": "/media/louwei@sribd.cn/T7 Shield/BRCA/GCN_logs/net_epoch=21.tar"
-                        # 'pretrained': None,
-                    },
-                },
-                "target_info": {"gen": (gen_targets, {}), "viz": (prep_sample, {})},
-                "batch_size": {"train": 64, "valid": 64,},  # engine name : value
-                "nr_epochs": 100,
-            },
-            {
-                "run_info": {
-                    # may need more dynamic for each network
-                    "net": {
-                        "desc": lambda: create_model(
-                            input_ch=3, nr_types=nr_type, 
-                            freeze=False, mode=mode
-                        ),
-                        "optimizer": [
-                            optim.Adam,
-                            {  # should match keyword for parameters within the optimizer
-                                "lr": 1.0e-4,  # initial learning rate,
-                                "betas": (0.9, 0.999),
-                            },
-                        ],
-                        # learning rate scheduler
-                        "lr_scheduler": lambda x: optim.lr_scheduler.StepLR(x, 25),
-                        "extra_info": {
-                            "loss": {
-                                "np": {"bce": 1, "dice": 1},
-                                "hv": {"mse": 1, "msge": 1},
-                                "tp": {"bce": 1, "dice": 1},
-                            },
-                        },
-                        # path to load, -1 to auto load checkpoint from previous phase,
-                        # None to start from scratch
-                        "pretrained": -1,
-                    },
-                },
-                "target_info": {"gen": (gen_targets, {}), "viz": (prep_sample, {})},
-                "batch_size": {"train": 16, "valid": 16,}, # batch size per gpu
-                "nr_epochs": 100,
-            },
-        ],
+        "phase_list": phase_list,
         # ------------------------------------------------------------------
         # TODO: dynamically for dataset plugin selection and processing also?
         # all enclosed engine shares the same neural networks
@@ -100,8 +127,8 @@ def get_config(nr_type, mode):
         "run_engine": {
             "train": {
                 # TODO: align here, file path or what? what about CV?
-                "dataset": "kumar",  # whats about compound dataset ?
-                "nr_procs": 16,  # number of threads for dataloader
+                "dataset": dataset_name,  # whats about compound dataset ?
+                "nr_procs": _get_env_int("CGT_TRAIN_WORKERS", 16),  # number of threads for dataloader
                 "run_step": train_step,  # TODO: function name or function variable ?
                 "reset_per_run": False,
                 # callbacks are run according to the list order of the event
@@ -121,8 +148,8 @@ def get_config(nr_type, mode):
                 },
             },
             "valid": {
-                "dataset": "kumar",  # whats about compound dataset ?
-                "nr_procs": 8,  # number of threads for dataloader
+                "dataset": dataset_name,  # whats about compound dataset ?
+                "nr_procs": _get_env_int("CGT_VALID_WORKERS", 8),  # number of threads for dataloader
                 "run_step": valid_step,
                 "reset_per_run": True,  # * to stop aggregating output etc. from last run
                 # callbacks are run according to the list order of the event
