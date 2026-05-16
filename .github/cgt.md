@@ -10,11 +10,36 @@ conda activate cgt
 pip install -r requirements.txt
 pip install torch==1.13.0+cu116 torchvision==0.14.0+cu116 torchaudio==0.13.0 --extra-index-url https://download.pytorch.org/whl/cu116
 pip install torch-geometric torch-scatter torch-sparse
+pip install datasets
 ```
 
 If your Lightning runtime uses a different CUDA/PyTorch stack, install matching Torch wheels first, then install the remaining dependencies.
 
-## 2) NuCLS data layout you downloaded
+## 2) Input options
+
+### Option A: Hugging Face dataset (your link)
+
+Use this to export fold-based train/valid directly to CGT format:
+
+```bash
+python export_nucls_hf.py \
+  --dataset_id minhanhto09/NuCLS_dataset \
+  --config_name default \
+  --fold 1 \
+  --output_root data/nucls
+```
+
+This creates:
+
+```text
+data/nucls/
+  train/images/*.png
+  train/labels_mat/*.mat
+  valid/images/*.png
+  valid/labels_mat/*.mat
+```
+
+### Option B: Manual download layout (`rgb/mask/csv`)
 
 Your screenshot matches this layout:
 
@@ -26,7 +51,7 @@ nucls_raw/
   visualization/
 ```
 
-CGT cannot train directly on this layout; first convert to `.mat` labels.
+CGT cannot train directly on this layout; first convert to `.mat` labels:
 
 ```bash
 python prepare_nucls_mat.py \
@@ -136,9 +161,10 @@ python compute_stats.py --mode=type --pred_dir outputs/nucls-exp01/mat --true_di
 
 ## 8) Notes specific to this repository
 
-1. `prepare_nucls_mat.py` converts downloaded NuCLS `rgb/mask/csv` into `.mat` annotations for this codebase.
-2. `extract_patches.py` writes patches in the shape expected by `dataloader/train_loader.py`: first 3 channels RGB, then annotation channels.
-3. If `csv` columns include instance IDs and type labels, `type_map` is generated directly; if only centroid coordinates are available, types are assigned by centroid lookup on `inst_map`.
-4. `CGT_CLASS_WEIGHTS` must match the number of non-background classes (`CGT_NR_TYPES - 1`).
-5. Training/inference configuration is controlled by env vars; avoid hardcoding machine-specific paths.
-6. `nucls` is a valid dataset key in `dataset.py`.
+1. `export_nucls_hf.py` exports the Hugging Face NuCLS dataset into this repository's expected train/valid + `.mat` format.
+2. `prepare_nucls_mat.py` converts manual NuCLS `rgb/mask/csv` downloads into `.mat` annotations for this codebase.
+3. `extract_patches.py` writes patches in the shape expected by `dataloader/train_loader.py`: first 3 channels RGB, then annotation channels.
+4. If `csv` columns include instance IDs and type labels, `type_map` is generated directly; if only centroid coordinates are available, types are assigned by centroid lookup on `inst_map`.
+5. `CGT_CLASS_WEIGHTS` must match the number of non-background classes (`CGT_NR_TYPES - 1`).
+6. Training/inference configuration is controlled by env vars; avoid hardcoding machine-specific paths.
+7. `nucls` is a valid dataset key in `dataset.py`.
