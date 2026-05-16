@@ -3,7 +3,6 @@ import torch.nn.functional as F
 
 import torch.nn as nn
 from torch.nn import LayerNorm, Linear, ReLU
-from fairseq import utils
 from .models.tokengt import TokenGTEncoder
 import torch
 import numpy as np
@@ -59,7 +58,7 @@ parser.add_argument("--performer-finetune", action="store_true",
                     help="load softmax checkpoint and fine-tune with performer")
 
 parser.add_argument("--apply-graphormer-init", action="store_true", help="use Graphormer initialization")
-parser.add_argument("--activation-fn", choices=utils.get_available_activation_fns(),default="gelu", help="activation to use")
+parser.add_argument("--activation-fn", choices=["relu", "gelu", "tanh", "silu"],default="gelu", help="activation to use")
 parser.add_argument("--encoder-normalize-before", action="store_true", help="apply layernorm before encoder")
 parser.add_argument("--prenorm",default=True, action="store_true", help="apply layernorm before self-attention and ffn")
 parser.add_argument("--postnorm",default=False, action="store_true", help="apply layernorm after self-attention and ffn")
@@ -101,7 +100,7 @@ class tokengt(nn.Module):
         """        
         
         super().__init__()
-        args = parser.parse_args()
+        args = parser.parse_args(args=[])
         #print(args)
         self.model = TokenGTEncoder(args)
 
@@ -148,7 +147,6 @@ class tokengt(nn.Module):
         h = h[0,:N,:]
         #print(h.shape)
         return h
-
 
 
 
