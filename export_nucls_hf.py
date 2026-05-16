@@ -113,6 +113,11 @@ def export_split(dataset_split, out_root, split_name):
             continue
 
         inst_map, type_map = decode_instance_and_type(sample["mask_image"])
+        if inst_map.shape[:2] != rgb.shape[:2]:
+            target_w = int(rgb.shape[1])
+            target_h = int(rgb.shape[0])
+            inst_map = cv2.resize(inst_map, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+            type_map = cv2.resize(type_map, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
         save_img = os.path.join(image_dir, stem + ".png")
         save_mat = os.path.join(label_dir, stem + ".mat")
 

@@ -168,3 +168,7 @@ python compute_stats.py --mode=type --pred_dir outputs/nucls-exp01/mat --true_di
 5. `CGT_CLASS_WEIGHTS` must match the number of non-background classes (`CGT_NR_TYPES - 1`).
 6. Training/inference configuration is controlled by env vars; avoid hardcoding machine-specific paths.
 7. `nucls` is a valid dataset key in `dataset.py`.
+
+## 9) Troubleshooting
+
+- If `extract_patches.py` raises a concatenate size mismatch (e.g., image height 333 vs label height 332), re-run `export_nucls_hf.py` with the latest code and then retry extraction. The exporter/extractor now auto-align image and label shapes.

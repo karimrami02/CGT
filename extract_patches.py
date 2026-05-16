@@ -4,7 +4,6 @@ Patch extraction script.
 """
 
 import argparse
-import re
 import glob
 import os
 import tqdm
@@ -44,14 +43,24 @@ def build_args():
     return parser.parse_args()
 
 
+def align_image_and_annotation(img, ann):
+    if img.shape[0] == ann.shape[0] and img.shape[1] == ann.shape[1]:
+        return img, ann
+
+    h = min(img.shape[0], ann.shape[0])
+    w = min(img.shape[1], ann.shape[1])
+    img = img[:h, :w]
+    ann = ann[:h, :w]
+    return img, ann
+
+
 def extract_split(split_name, split_desc, cfg, dataset_parser, xtractor):
     img_ext, img_dir = split_desc["img"]
     ann_ext, ann_dir = split_desc["ann"]
     output_tag = "%dx%d_%dx%d" % (cfg.win_size, cfg.win_size, cfg.step_size, cfg.step_size)
     out_dir = os.path.join(cfg.save_root, cfg.dataset_name, cfg.dataset_name, split_name, output_tag)
 
-    patterning = lambda x: re.sub("([\[\]])", "[\\1]", x)
-    file_list = glob.glob(patterning("%s/*%s" % (ann_dir, ann_ext)))
+    file_list = glob.glob(os.path.join(glob.escape(ann_dir), "*" + ann_ext))
     file_list.sort()
     if len(file_list) == 0:
         raise RuntimeError("No annotation files detected in %s with extension %s" % (ann_dir, ann_ext))
@@ -69,6 +78,7 @@ def extract_split(split_name, split_desc, cfg, dataset_parser, xtractor):
 
         img = dataset_parser.load_img(img_path)
         ann = dataset_parser.load_ann(ann_path, not cfg.no_type_classification)
+        img, ann = align_image_and_annotation(img, ann)
         img = np.concatenate([img, ann], axis=-1)
         sub_patches = xtractor.extract(img, cfg.extract_type)
 
