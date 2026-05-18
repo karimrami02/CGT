@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 import cv2
 from misc.utils import center_pad_to_shape, cropping_center
-from .utils import crop_to_shape, dice_loss, mse_loss, xentropy_loss, CE_loss,get_bboxes,focal_loss,weighted_entropy_loss,add_class,get_infer_bboxes
+from .utils import crop_to_shape, dice_loss, mse_loss, xentropy_loss, get_bboxes, weighted_entropy_loss, add_class, get_infer_bboxes
 import os
 from collections import OrderedDict
 ####
@@ -17,6 +17,16 @@ def _parse_class_weights():
 
 training_weights = _parse_class_weights() ##Change based on different datasets
 edge_num = int(os.environ.get("CGT_EDGE_NUM", "4"))
+
+
+def _stable_focal_loss(logits, targets, class_weights, gamma=2.0):
+    weights = torch.tensor(class_weights, device=logits.device, dtype=logits.dtype)
+    log_probs = F.log_softmax(logits, dim=-1)
+    probs = torch.exp(log_probs)
+    pt = probs.gather(1, targets.unsqueeze(1)).squeeze(1)
+    ce_per_sample = F.nll_loss(log_probs, targets, weight=weights, reduction="none")
+    return ((1.0 - pt).pow(gamma) * ce_per_sample).mean()
+
 
 def train_step(batch_data, run_info):
     # TODO: synchronize the attach protocol
@@ -98,8 +108,14 @@ def train_step(batch_data, run_info):
     #batch_pos_emb = torch.stack(batch_pos_emb)
     inst_classes = torch.cat(inst_classes,0)
     true_inst_classes = torch.squeeze(inst_classes).to("cuda").type(torch.int64)
-    true_inst_classes_onehot = F.one_hot(true_inst_classes, num_classes=model.module.nr_types-1)
-    true_inst_classes_onehot = true_inst_classes_onehot.type(torch.float32)
+    if true_inst_classes.ndim == 0:
+        true_inst_classes = true_inst_classes.unsqueeze(0)
+    num_cls = model.module.nr_types - 1
+    if (true_inst_classes < 0).any() or (true_inst_classes >= num_cls).any():
+        raise ValueError(
+            "Instance class index out of range [0, %d]. Got min=%d max=%d."
+            % (num_cls - 1, int(true_inst_classes.min().item()), int(true_inst_classes.max().item()))
+        )
     #print(true_inst_classes_onehot.shape)
     ####
     model.train()
@@ -114,7 +130,8 @@ def train_step(batch_data, run_info):
     pred_map, pred_classes = pred_dict["tp"][0],pred_dict["tp"][1]
     pred_map = pred_map.permute(0, 2, 3, 1).contiguous()
     pred_map = F.softmax(pred_map, dim=-1)
-    pred_classes = F.softmax(pred_classes, dim=-1)
+    if not torch.isfinite(pred_classes).all():
+        raise ValueError("Non-finite class logits detected before loss computation.")
     #print(pred_map.shape,pred_classes.shape)
 
     ####
@@ -131,14 +148,23 @@ def train_step(batch_data, run_info):
             #track_value("loss_%s_%s" % (branch_name, loss_name), term_loss.cpu().item())
             #print(term_loss)
             #loss += loss_weight * term_loss
-        ce_loss = CE_loss(pred_classes,true_inst_classes_onehot)
-        class_loss = focal_loss(pred_classes,true_inst_classes_onehot,training_weights)
+        class_weights = torch.tensor(training_weights, device=pred_classes.device, dtype=pred_classes.dtype)
+        ce_loss = F.cross_entropy(
+            pred_classes,
+            true_inst_classes,
+            weight=class_weights,
+            reduction="mean",
+            label_smoothing=0.1,
+        )
+        class_loss = _stable_focal_loss(pred_classes, true_inst_classes, training_weights)
         track_value("loss_%s_%s" % (branch_name, "focal"), class_loss.cpu().item())
         track_value("loss_%s_%s" % (branch_name, "ce"), ce_loss.cpu().item())
         print(class_loss.cpu().item(),ce_loss.cpu().item())
         loss += class_loss
         loss += ce_loss
 
+    if not torch.isfinite(loss):
+        raise ValueError("Non-finite overall loss detected.")
     track_value("overall_loss", loss.cpu().item())
     # * gradient update
     correct = inst_classes.cpu().numpy().reshape(inst_classes.shape[0])
