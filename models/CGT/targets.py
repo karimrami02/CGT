@@ -39,23 +39,27 @@ def gen_instance_hv_map(ann, crop_shape):
     inst_list.remove(0)  # 0 is background
     for inst_id in inst_list:
         inst_map = np.array(fixed_ann == inst_id, np.uint8)
+        if not np.any(inst_map):
+            continue
         inst_box = get_bounding_box(inst_map)
 
         # expand the box by 2px
         # Because we first pad the ann at line 207, the bboxes
         # will remain valid after expansion
-        inst_box[0] -= 2
-        inst_box[2] -= 2
-        inst_box[1] += 2
-        inst_box[3] += 2
+        inst_box[0] = max(inst_box[0] - 2, 0)
+        inst_box[2] = max(inst_box[2] - 2, 0)
+        inst_box[1] = min(inst_box[1] + 2, fixed_ann.shape[0])
+        inst_box[3] = min(inst_box[3] + 2, fixed_ann.shape[1])
 
         inst_map = inst_map[inst_box[0] : inst_box[1], inst_box[2] : inst_box[3]]
 
-        if inst_map.shape[0] < 2 or inst_map.shape[1] < 2:
+        if inst_map.shape[0] < 2 or inst_map.shape[1] < 2 or not np.any(inst_map):
             continue
 
         # instance center of mass, rounded to nearest pixel
         inst_com = list(measurements.center_of_mass(inst_map))
+        if not np.isfinite(inst_com[0]) or not np.isfinite(inst_com[1]):
+            continue
 
         inst_com[0] = int(inst_com[0] + 0.5)
         inst_com[1] = int(inst_com[1] + 0.5)
