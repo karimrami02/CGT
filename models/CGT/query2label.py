@@ -7,10 +7,19 @@ from .models.tokengt import TokenGTEncoder
 import torch
 import numpy as np
 import pyximport
+import warnings
 
 from . import algos
-pyximport.install(setup_args={"include_dirs": np.get_include()})
-from . import algos_spd
+try:
+    pyximport.install(setup_args={"include_dirs": np.get_include()})
+    from . import algos_spd  # noqa: F401
+except ImportError as exc:
+    warnings.warn(
+        f"Failed to build optional Cython module algos_spd: {exc}. "
+        "Continuing with Python implementation.",
+        RuntimeWarning,
+    )
+    algos_spd = None
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--num-atoms", type=int, metavar="D",default=2500,  help="dropout prob")
@@ -147,6 +156,5 @@ class tokengt(nn.Module):
         h = h[0,:N,:]
         #print(h.shape)
         return h
-
 
 
